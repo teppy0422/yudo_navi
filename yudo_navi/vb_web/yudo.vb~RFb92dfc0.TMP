@@ -1,0 +1,136 @@
+﻿Public Class yudo
+    'ディスプレイの高さ
+    Public h As Integer = System.Windows.Forms.Screen.PrimaryScreen.Bounds.Height
+    'ディスプレイの幅
+    Public w As Integer = System.Windows.Forms.Screen.PrimaryScreen.Bounds.Width
+    Public strBeforeHTML As String
+    Public stCurrentDir As String = System.Environment.CurrentDirectory
+    Public hinban As String = Form0.TextBox1.Text
+
+    'ここから下はオプションに移動
+    Public myPort As String
+    Public myRate As String
+    Public MonitorWidth As Long
+    Public MonitorLeft As Long
+    Public MortorDiameter As Single
+    Public MortorStepMax As Long
+    Public MortorCW As String
+
+    Public mmStep As Single = MortorDiameter * 3.141592 / MortorStepMax
+
+    Private Sub yudo_Load(sender As Object, e As EventArgs) Handles Me.Load
+        'シリアルポートをオープンしている場合、クローズする.
+        If SerialPort1.IsOpen Then SerialPort1.Close()
+        'setting.txtの読み込み
+        Dim DataSettingURL As String = stCurrentDir & "\setting.txt"
+        Dim sr As New System.IO.StreamReader(DataSettingURL, System.Text.Encoding.GetEncoding("shift_jis"))
+
+        While sr.Peek() > -1
+            Dim readSP As String() = Split(sr.ReadLine(), ":")
+            If "port" = readSP(0) Then myPort = readSP(1)
+            If "rate" = readSP(0) Then myRate = readSP(1)
+            If "a" = readSP(0) Then MonitorWidth = readSP(1)
+            If "b" = readSP(0) Then MonitorLeft = readSP(1)
+            If "c" = readSP(0) Then MortorDiameter = readSP(1)
+            If "d" = readSP(0) Then MortorStepMax = readSP(1)
+            If "e" = readSP(0) Then MortorCW = readSP(1)
+        End While
+        mmStep = MortorDiameter * 3.141592 / MortorStepMax
+        sr.Close()
+        'index.htmlを開く
+        Dim sentaku As String = Form0.TextBox1.Text
+        Dim url As String = stCurrentDir & "\haisaku\" & sentaku & "\index.html"
+        WebBrowser1.Navigate(url)
+        'メニューバー
+        'Me.FormBorderStyle = FormBorderStyle.None '完全に消す
+        'Me.ControlBox = False
+        'Me.Text = ""
+        'フルスクリーン
+        Me.FormBorderStyle = FormBorderStyle.None
+        Me.WindowState = FormWindowState.Maximized
+        'タイマーの開始
+        Timer1.Start()
+        Label2.Top = h - Label2.Height
+        Label2.Left = w - Label2.Width - 2
+        Label1.Top = h - Label1.Height - Label2.Height
+        Label1.Left = w - Label1.Width - 2
+        'シリアル接続temp
+        If myPort <> "使用しない" Then
+            'オープンするシリアルポートをコンボボックスから取り出す.
+            SerialPort1.PortName = myPort
+            'ボーレートをコンボボックスから取り出す.
+            SerialPort1.BaudRate = CLng(myRate)
+            'データビットをセットする. (データビット = 8ビット)
+            SerialPort1.DataBits = 8
+            'パリティビットをセットする. (パリティビット = なし)
+            SerialPort1.Parity = IO.Ports.Parity.None
+            'ストップビットをセットする. (ストップビット = 1ビット)
+            'SerialPort1.StopBits = IO.Ports.StopBits.None
+            '文字コードをセットする.
+            'SerialPort1.Encoding = Encoding.Unicode
+
+            Try
+                'シリアルポートをオープンする.
+                SerialPort1.PortName = myPort
+                SerialPort1.Open()
+            Catch ex As Exception
+                MsgBox(ex.Message)
+            End Try
+        End If
+    End Sub
+
+    Private Sub Timer1_Tick(sender As Object, e As EventArgs) Handles Timer1.Tick
+        Label1.Text = Date.Now.ToString("HH:mm:ss")
+        Me.ActiveControl = Me.TextBox1 'JavaScript実行でフォーカスをHtmlに取られるからフォーカスをtextbox1に移す
+    End Sub
+
+    Private Sub yudo_Resize(sender As Object, e As EventArgs) Handles Me.Resize
+        Label2.Top = h - Label2.Height
+        Label2.Left = w - Label2.Width - 2
+        Label1.Top = h - Label1.Height - Label2.Height
+        Label1.Left = w - Label1.Width - 2
+    End Sub
+
+    Private Sub TextBox1_KeyDown(sender As Object, e As KeyEventArgs) Handles TextBox1.KeyDown
+        If e.KeyCode = Keys.Enter Then
+            '誘導画面の変更
+            Dim senderSTR As String = sender.text, mySTR As String
+            Select Case Len(senderSTR)
+                Case < 10
+                    mySTR = senderSTR
+                Case Else
+                    mySTR = Mid(senderSTR, 12, 4)
+            End Select
+            WebBrowser1.Url = New Uri(stCurrentDir & "\haisaku\" & hinban & "\" & mySTR & ".html")
+            TextBox1.Text = ""
+            '誘導モニタの移動
+            If myport <> "使用しない" Then
+                If Len(mySTR) <= 3 Then
+                    Dim xMoveURL As String = stCurrentDir & "\haisaku\" & hinban & "\xMove\後ハメ図.csv"
+                    Call SendToArduino_Step(mySTR, xMoveURL)
+                Else
+                    Dim xMoveURL As String = stCurrentDir & "\haisaku\" & hinban & "\xMove\構成.csv"
+                    Call SendToArduino_Step(mySTR, xMoveURL)
+                End If
+            End If
+        End If
+    End Sub
+
+    Public Function SendToArduino_Step(myStr As String, xMoveURL As String)
+        Dim sr As New System.IO.StreamReader(xMoveURL, System.Text.Encoding.GetEncoding("shift_jis"))
+        While sr.Peek() > -1
+            Dim readSP As String() = Split(sr.ReadLine(), ",")
+            If myStr = readSP(0) Then
+                'Stop
+                Dim xStep As Long = ((CSng(readSP(1)) - (MonitorWidth / 2)) - MonitorLeft) / mmStep
+                If xStep < 0 Then xStep = 0
+                If MortorCW = "CCW" Then xStep = -xStep
+                Me.SerialPort1.WriteLine(xStep) 'ArduinoにStep数を送る
+            End If
+        End While
+    End Function
+
+    Private Sub TextBox1_TextChanged(sender As Object, e As EventArgs) Handles TextBox1.TextChanged
+
+    End Sub
+End Class
